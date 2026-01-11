@@ -28,6 +28,7 @@ ENV NODE_ENV=production
 ENV DATABASE_URL=""
 ENV PORT=3000
 
+
 # Note: DATABASE_URL is set to empty string as default
 # It should be provided at runtime: docker run -e DATABASE_URL=postgresql://...
 # You can also override NODE_ENV: docker run -e NODE_ENV=development
