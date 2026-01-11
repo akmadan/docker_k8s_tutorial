@@ -1,0 +1,320 @@
+# ============================================
+# Docker Compose Configuration
+# ============================================
+# Docker Compose allows you to define and run multi-container Docker applications
+# This file defines services, networks, and volumes in YAML format
+# 
+# Key Concepts:
+# - Services: Containers that run your applications
+# - Volumes: Persistent data storage
+# - Networks: Communication between containers
+#
+# Commands:
+#   docker-compose up          - Start all services
+#   docker-compose up -d       - Start in detached mode (background)
+#   docker-compose down        - Stop and remove containers
+#   docker-compose ps          - List running services
+#   docker-compose logs        - View logs
+#   docker-compose build       - Build images
+# ============================================
+
+version: '3.8'
+
+# ============================================
+# SERVICES
+# ============================================
+# Services are the containers that will run
+# Each service can build from a Dockerfile or use a pre-built image
+services:
+  
+  # ============================================
+  # Service 1: Node.js Application
+  # ============================================
+  # This service builds our Node.js server from the Dockerfile
+  web:
+    # Build the image from Dockerfile in the current directory
+    # The '.' means "current directory" where docker-compose.yml is located
+    # Docker Compose will run: docker build -t <project>_web .
+    build:
+      context: .                    # Build context (directory containing Dockerfile)
+      dockerfile: Dockerfile        # Name of the Dockerfile (default is Dockerfile)
+    
+    # Alternative: Use a pre-built image from Docker Hub
+    # image: hello-world-server:latest
+    
+    # Name the container (optional, but helpful for identification)
+    container_name: hello-world-server
+    
+    # Port mapping: host_port:container_port
+    # Maps port 3000 on your host machine to port 3000 in the container
+    # Format: "HOST:CONTAINER"
+    # Access the app at: http://localhost:3000
+    ports:
+      - "3000:3000"
+    
+    # Environment variables for the application
+    # These override the ENV variables set in the Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # DATABASE_URL uses service name 'db' as hostname (Docker Compose DNS)
+      # Format: postgresql://user:password@host:port/database
+      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/mydb
+      # Redis connection using service name 'redis' as hostname
+      - REDIS_URL=redis://redis:6379
+    
+    # Restart policy: what to do if container stops
+    # Options:
+    #   no          - Never restart (default)
+    #   always      - Always restart if it stops
+    #   on-failure  - Restart only on failure (non-zero exit code)
+    #   unless-stopped - Always restart unless explicitly stopped
+    restart: unless-stopped
+    
+    # Dependencies: Services that must start before this service
+    # Docker Compose will start 'db' and 'redis' before starting 'web'
+    depends_on:
+      - db
+      - redis
+    
+    # Network: Connect this service to a specific network
+    # By default, all services are on the same network and can communicate
+    # using service names as hostnames (e.g., 'db', 'redis')
+    networks:
+      - app-network
+    
+    # Volumes: Mount directories or files
+    # This is commented out for production, but useful for development
+    # Uncomment to sync local code with container (hot reload in development)
+    # volumes:
+    #   - .:/app                    # Mount current directory to /app
+    #   - /app/node_modules         # Prevent overwriting node_modules in container
+  
+  # ============================================
+  # Service 2: PostgreSQL Database
+  # ============================================
+  # This service uses the official PostgreSQL image from Docker Hub
+  # No Dockerfile needed - we use a pre-built image
+  db:
+    # Use the official PostgreSQL image
+    # Docker Compose will pull this from Docker Hub if not already present
+    image: postgres:15-alpine
+    
+    # Container name
+    container_name: postgres-db
+    
+    # Environment variables for PostgreSQL
+    # These are specific to the PostgreSQL image
+    environment:
+      # PostgreSQL superuser credentials
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgrespassword
+      - POSTGRES_DB=mydb
+      # Optional: Initialize database with SQL scripts
+      # - POSTGRES_INITDB_ARGS=--encoding=UTF8
+    
+    # Port mapping: Expose PostgreSQL port
+    # Format: host_port:container_port
+    # PostgreSQL default port is 5432
+    # Access from host: localhost:5432
+    ports:
+      - "5432:5432"
+    
+    # ============================================
+    # VOLUMES - Data Persistence
+    # ============================================
+    # Volumes store data outside the container's lifecycle
+    # When container is removed, data in volumes persists
+    # 
+    # Types of volumes:
+    # 1. Named volumes (recommended): Managed by Docker
+    #    - Syntax: volume_name:/path/in/container
+    #    - Data stored in Docker's volume directory
+    #    - Example: postgres-data:/var/lib/postgresql/data
+    #
+    # 2. Bind mounts: Mount host directory to container
+    #    - Syntax: /host/path:/container/path
+    #    - Direct access to host filesystem
+    #    - Example: ./data:/var/lib/postgresql/data
+    #
+    # 3. Anonymous volumes: Temporary, removed with container
+    #    - Syntax: /container/path
+    #    - Example: /var/lib/postgresql/data
+    volumes:
+      # Named volume: postgres-data
+      # This volume will persist database data even if container is removed
+      # First time: Docker creates the volume
+      # Subsequent runs: Docker uses existing volume (data persists!)
+      - postgres-data:/var/lib/postgresql/data
+      
+      # Optional: Bind mount for initialization scripts
+      # Uncomment to run SQL scripts on first startup
+      # - ./init-db:/docker-entrypoint-initdb.d
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Network: Connect to app network
+    networks:
+      - app-network
+    
+    # Health check: Verify database is ready
+    # Docker Compose waits for health check to pass before starting dependent services
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s          # Check every 10 seconds
+      timeout: 5s            # Timeout after 5 seconds
+      retries: 5             # Retry 5 times before marking unhealthy
+      start_period: 30s     # Wait 30 seconds before first check
+  
+  # ============================================
+  # Service 3: Redis Cache
+  # ============================================
+  # This service uses the official Redis image from Docker Hub
+  redis:
+    # Use the official Redis image
+    image: redis:7-alpine
+    
+    # Container name
+    container_name: redis-cache
+    
+    # Port mapping: Expose Redis port
+    # Redis default port is 6379
+    # Access from host: localhost:6379
+    ports:
+      - "6379:6379"
+    
+    # Redis command: Run Redis server
+    # Optional: Add password with: redis-server --requirepass password
+    command: redis-server --appendonly yes
+    
+    # ============================================
+    # VOLUMES - Redis Data Persistence
+    # ============================================
+    # Store Redis data in a named volume
+    # This persists Redis cache data across container restarts
+    volumes:
+      # Named volume for Redis data
+      - redis-data:/data
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Network: Connect to app network
+    networks:
+      - app-network
+    
+    # Health check: Verify Redis is ready
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+# ============================================
+# VOLUMES (Named Volumes Definition)
+# ============================================
+# Define named volumes that can be shared across services
+# Named volumes are managed by Docker and persist data
+# 
+# Benefits of named volumes:
+# - Data persists when containers are removed
+# - Can be shared between containers
+# - Better performance than bind mounts
+# - Platform-independent (works on any OS)
+#
+# Volume locations (managed by Docker):
+# - Linux: /var/lib/docker/volumes/
+# - Mac/Windows: Managed by Docker Desktop
+volumes:
+  # PostgreSQL data volume
+  # Stores all database files and data
+  # This volume will be created automatically on first run
+  postgres-data:
+    driver: local        # Use local filesystem driver
+    # Optional: Specify custom location
+    # driver_opts:
+    #   type: none
+    #   device: /path/to/custom/location
+    #   o: bind
+  
+  # Redis data volume
+  # Stores Redis cache and AOF (Append Only File) data
+  redis-data:
+    driver: local
+
+# ============================================
+# NETWORKS
+# ============================================
+# Define custom networks for service communication
+# By default, Docker Compose creates a network for all services
+# Services on the same network can communicate using service names as hostnames
+#
+# Example: From 'web' service, you can connect to:
+#   - db:5432      (PostgreSQL)
+#   - redis:6379   (Redis)
+#
+# Benefits of custom networks:
+# - Isolation: Separate networks for different apps
+# - Security: Control which services can communicate
+# - DNS: Automatic service discovery using service names
+networks:
+  app-network:
+    driver: bridge        # Bridge network (default, connects containers)
+    # Alternative drivers:
+    #   host: Use host network (Linux only)
+    #   none: No networking
+
+# ============================================
+# USAGE EXAMPLES
+# ============================================
+#
+# Start all services:
+#   docker-compose up
+#
+# Start in background (detached mode):
+#   docker-compose up -d
+#
+# Build and start:
+#   docker-compose up --build
+#
+# Stop all services:
+#   docker-compose down
+#
+# Stop and remove volumes (WARNING: Deletes all data!):
+#   docker-compose down -v
+#
+# View logs:
+#   docker-compose logs
+#   docker-compose logs web      # Logs for specific service
+#   docker-compose logs -f web   # Follow logs
+#
+# Execute command in running container:
+#   docker-compose exec web sh
+#   docker-compose exec db psql -U postgres -d mydb
+#
+# Scale services (if needed):
+#   docker-compose up --scale web=3    # Run 3 instances of web service
+#
+# List running services:
+#   docker-compose ps
+#
+# ============================================
+# VOLUME MANAGEMENT
+# ============================================
+#
+# List volumes:
+#   docker volume ls
+#
+# Inspect volume:
+#   docker volume inspect <project>_postgres-data
+#
+# Remove volume (WARNING: Deletes data!):
+#   docker volume rm <project>_postgres-data
+#
+# Backup volume:
+#   docker run --rm -v <project>_postgres-data:/data -v $(pwd):/backup \
+#     alpine tar czf /backup/postgres-backup.tar.gz /data
+#
+# ============================================
